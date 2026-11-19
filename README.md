@@ -30,6 +30,8 @@ Verda 借用的是**用位置帮助回忆**这件事。项目是查找的入口�
 
 **百科式链接把不同主题串起来。** 例如，结果卡可以链接到采用的方法，再由带时间的取代关系指明哪一版仍有效。这样，同一条方法或证据可以被多条结论引用，修改状态也有可追溯的路径。Verda 自动召回只沿已登记的关系扩展一跳，复核访问权限、两端内容及关系证据，并把适用的片段带进当前任务。
 
+**跨会话共享，按当前主题召回。** 同一账户的会话可以复用记忆，但当前请求和会话绑定的项目决定召回范围。“继续”优先恢复当前任务的检查点。能明确识别当前项目时，自动召回会过滤已识别为其他项目的材料，关联也要重新通过相关性和证据检查。例如，实验会话继续核对数据划分时，另一个项目的客户端发布记录会留在各自的项目里。没有足够相关的内容时，Verda 可以留空。
+
 ### Verda 如何分配召回注意力
 
 这里的注意力指**哪些证据拿到上下文位置，以及占用多少预算**。Verda 按以下顺序决定。
@@ -100,6 +102,8 @@ Cicero tells a story about the poet Simonides. After Simonides stepped outside a
 Verda borrows **location as a retrieval cue**. A project is an entry point. Decisions, methods, and results occupy topic rooms. Fact cards and original sources have stable `viking://` addresses. Task checkpoints record progress and open questions. After compaction, the agent can resume from that structure and consult the original record when it needs to verify a detail.
 
 **Wikipedia-style links connect those topics.** A result can point to the method it used, while a dated replacement link records which version applies. Several conclusions can cite the same source, and changes remain traceable. Automatic recall follows registered links at most one hop. It verifies access, both entries' contents, and the evidence for the relationship before using a relevant passage.
+
+**Shared across sessions, scoped to the current topic.** Sessions under the same account can reuse memory, with recall guided by the current request and the session's project binding. A continuation request favors the current task checkpoint. When the current project is confidently identified, automatic recall filters material identified as belonging to other projects, and linked passages have to pass relevance and evidence checks. For example, a session verifying an experiment's data split stays focused while a separate project's client release notes remain available in their own project. If nothing relevant qualifies, Verda can return empty.
 
 ### How Verda allocates recall attention
 
