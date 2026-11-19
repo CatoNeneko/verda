@@ -20,7 +20,7 @@ from .vdra_state import atomic_json as atomic_json
 from .vdra_state import clean as clean
 from .vdra_state import cli
 
-REVISION = "vdra-0.1.0a1"
+REVISION = "vdra-0.1.0a2"
 MAX_CONTEXT_TOKENS = 1500
 
 

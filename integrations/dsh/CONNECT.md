@@ -17,4 +17,10 @@ For native Windows DSH Desktop, use **Plugins → Add plugin** and install `@ope
 
 In a fresh DSH conversation, check the available OpenViking tools and recall a fact from your isolated test workspace. The upstream plugin handles capture and injection, including its own default settings. Use a separate profile if you want to restrict that capture to testing.
 
+## Verified combinations
+
+With DSH `0.2.2-rc.5` and the memory bundle `0.5.39`, both native Windows Desktop and WSL Web completed a real UI turn with automatic recall, a successful OpenViking MCP `read`, and capture of both messages. These checks used an isolated Verda workspace and a scripted loopback model endpoint. WSL and native Windows npm CLI recall and capture were also checked separately.
+
+For a disposable Windows Desktop test, preserve the normal Windows user environment and specify a separate DSH home and Electron user-data directory. Start a new conversation after installation so the memory hooks can initialize.
+
 [Upstream DSH setup and configuration](https://docs.openviking.ai/en/agent-integrations/17-dsh)

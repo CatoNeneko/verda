@@ -69,11 +69,27 @@ Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据�
 
 2026 年 10 月 29 日，本机先比较了 base、M3、每次双模型和按需双模型，再选定 M3。它在这批题中找回的完整证据最多，并且只需驻留一个嵌入模型。在 6 道自然长请求里，base 命中 3 道，M3 命中 5 道。切换时用 M3 建了独立的 **1024 维向量集合**，迁入 **2,094 条**记录并核对元数据和权限，保留旧集合用于回滚。两版都使用 OpenViking 的本地向量数据库后端。
 
+### DSH 桌面与 Web 实测
+
+在 DeepSeek Harness `0.2.2-rc.5` 与 OpenViking 记忆插件 `0.5.39` 上，已分别从 **Windows 原生 Desktop** 和 **WSL Web 界面**发起实际对话。两边都验证了三件事。
+
+- Verda 从本地记忆召回了有来源的项目事实，并送进了本轮模型输入。
+- DSH 实际执行了 `mcp__openviking__read`，读取的原卡证据回到了同一个对话。
+- 用户消息和助手回复均被采集，在隔离记忆服务中可以读回。
+
+测试用合成项目资料和本地模拟模型端点。npm CLI 安装插件需要 Node.js 24.9 或更新版本和 PATH 上的 pnpm。Windows Desktop 使用随包运行时和单独的 desktop profile。[DSH 接入指南](integrations/dsh/CONNECT.md)
+
 ### 首次使用与部署
 
 **首次使用，请先导入想延续的历史对话。** 新工作区从空白开始。导入获准的本地历史后，旧对话中的事实和决定才会进入可召回的记忆库。
 
-Codex、DeepSeek Harness 和通用 MCP 各有接入包，共用同一个核心。原生 Windows x64 和 WSL Linux 已通过隔离安装、召回和回滚测试。把 [Agent 部署指南](docs/INSTALL.md#中文) 发给负责部署的 Agent，选包、导入历史和验证的步骤都在里面。
+**Codex 和 DeepSeek Harness（DSH）的安装入口不同。** 选对应的 ZIP，再接入同一个 Verda 服务。
+
+- **Codex** 选 `-codex.zip`，通过 Codex 插件市场启用 OpenViking 自动召回和采集。只需要主动检索时，可直接配置 MCP。
+- **DSH** 选 `-dsh.zip`。桌面版在 **Plugins → Add plugin** 安装，Web 和 CLI 用 `dsh plugin --profile … add` 安装到实际运行的 profile。
+- **其他 MCP 客户端** 选 `-mcp.zip`，通过 Streamable HTTP 接入。
+
+**强烈建议把安装交给 Agent。** [简明安装指南](docs/README.md#简体中文) 同时提供可复制的 Agent 指令和手动步骤。完整配置、历史导入和回滚见 [部署指南](docs/INSTALL.md#中文)。原生 Windows x64 和 WSL Linux 已通过隔离安装、召回和回滚测试。
 
 如果 Verda 用起来顺手，帮你解决了长对话里的记忆问题，欢迎给项目点个 ⭐ Star。
 
@@ -144,14 +160,30 @@ The earlier deployment used **BGE-small-zh-v1.5 F16 GGUF** with 512-dimensional 
 
 On October 29, 2026, the author compared base, M3, always running both models, and selective M3 routing before choosing M3. It recovered the most complete evidence on this test set and required just one resident embedding model. On six naturally phrased long requests, base covered three and M3 covered five. The migration built a separate **1,024-dimensional collection**, moved **2,094 records** with metadata and access checks, and kept the old collection for rollback. Both versions use OpenViking's local vector database backend.
 
+### DSH Desktop and Web verification
+
+Actual conversations were tested in **native Windows Desktop** and the **WSL Web UI** with DeepSeek Harness `0.2.2-rc.5` and OpenViking memory plugin `0.5.39`. Both interfaces passed three checks.
+
+- Verda recalled a sourced project fact from local memory and included it in that turn's model input.
+- DSH executed `mcp__openviking__read` and returned the original evidence to the same conversation.
+- The user message and assistant reply were captured and could be read back from the isolated memory service.
+
+Tests used synthetic project data and a local scripted model endpoint. Installing plugins with the npm CLI requires Node.js 24.9 or newer and pnpm on PATH. Windows Desktop uses its bundled runtime and a separate desktop profile. [DSH integration guide](integrations/dsh/CONNECT.md)
+
 ### First use and deployment
 
 **Import the conversation history you want to carry forward.** A new workspace starts empty. Import approved local history to make facts and decisions from earlier sessions available for recall.
 
-Codex, DeepSeek Harness, and generic MCP bundles share one core. Isolated install, recall, and rollback were tested on native Windows x64 and WSL Linux. Give the [Agent Deployment Guide](docs/INSTALL.md#english) to the deploying agent for bundle selection, history import, and verification.
+**Codex and DeepSeek Harness (DSH) use different installation paths.** Pick the matching ZIP and connect it to the shared Verda service.
+
+- **Codex** uses `-codex.zip` and the Codex marketplace plugin for automatic recall and capture. Direct MCP is available for on-demand search.
+- **DSH** uses `-dsh.zip`. Desktop installs through **Plugins → Add plugin**. Web and CLI install with `dsh plugin --profile … add` in the profile they run.
+- **Other MCP clients** use `-mcp.zip` with Streamable HTTP.
+
+**We strongly recommend letting an agent install Verda.** The [Quick Install Guide](docs/README.md#english) includes a copyable agent prompt and manual steps. The [Deployment Guide](docs/INSTALL.md#english) covers configuration, history import, and rollback. Isolated install, recall, and rollback were tested on native Windows x64 and WSL Linux.
 
 If Verda helps you keep track of long conversations and solves a real problem for you, a ⭐ star is appreciated.
 
 ---
 
-[Alpha release](https://github.com/CatoNeneko/verda/releases/tag/v0.1.0a1) · [AGPL v3](LICENSE)
+[Alpha release](https://github.com/CatoNeneko/verda/releases/tag/v0.1.0a2) · [AGPL v3](LICENSE)

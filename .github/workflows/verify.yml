@@ -15,6 +15,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install build
       - run: python -m build
-      - run: python -m pip install dist/vdra-0.1.0a1-py3-none-any.whl
+      - run: python -m pip install dist/vdra-0.1.0a2-py3-none-any.whl
       - run: python -m unittest discover -s tests -v
       - run: python tools/build_agent_bundles.py

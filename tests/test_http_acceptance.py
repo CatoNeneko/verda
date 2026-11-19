@@ -287,7 +287,7 @@ class HttpAcceptanceTest(unittest.TestCase):
         query = "What dataset split did we decide for Garden Study?"
         result = recall(query, "dsh-alpha-two")
         stats = result["stats"]
-        self.assertEqual(stats["recall_outcome"]["adapter_revision"], "vdra-0.1.0a1")
+        self.assertEqual(stats["recall_outcome"]["adapter_revision"], "vdra-0.1.0a2")
         self.assertIn("70%", result["rendered"])
 
         gap = recall(
