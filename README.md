@@ -26,6 +26,23 @@ OpenViking 提供存储、向量检索、会话和 MCP 接口。Verda 沿用这�
 
 在一个合成测试项目中，Agent 同时核对**数据划分**和**预注册的传感器协议**。Verda 找到记录训练、验证、测试集按 **70% / 15% / 15%** 划分的段落，并报告 `fact_coverage.missing: [2]`。这让 Agent 能回答第一项，同时明确第二项仍需查证。
 
+### CPU 本地向量检索
+
+**检索可以完全在本机 CPU 上运行，无需额外购买外部搜索或 embedding API。** 本机使用 OpenViking 内置的本地向量数据库（`storage.vectordb.backend=local`）。2026 年 11 月 19 日测得活动向量集合占 **29.1 MiB**，其中向量索引约 **10.0 MiB**。这是向量集合的体积，模型权重和原始对话另计。可通过 [OpenViking 本地嵌入配置](https://docs.openviking.ai/en/guides/01-configuration#local-provider-local) 接入 CPU 模型。
+
+轻量部署可选 **BGE-small-zh-v1.5 F16 GGUF**，本机权重文件实测 **45.7 MiB**，输出 512 维向量。本机长对话部署使用 **BGE-M3 FP32**，以两条 CPU 推理线程生成 1024 维向量。历史提炼和可选的模型总结沿用配置的模型服务。
+
+#### 本机实测
+
+Ryzen 7 9800X3D，CPU 两线程。离线对照使用 457 个脱敏来源和 2,268 个段落，两组均将稠密向量检索与 BM25 关键词检索融合。
+
+| 嵌入模型 | FP32 权重 | 完整证据 Hit@5 | 热查询均值 / p95 | 查询进程内存 |
+| --- | ---: | ---: | ---: | ---: |
+| [BGE-base-zh-v1.5](https://huggingface.co/BAAI/bge-base-zh-v1.5) | 390 MiB | 69.0%（29/42） | 0.224 / 0.455 秒 | 0.77 GiB |
+| [BGE-M3](https://huggingface.co/BAAI/bge-m3) | 2.12 GiB | **81.0%（34/42）** | **0.431 / 1.028 秒** | 1.84 GiB |
+
+Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据。计时使用每组 36 次热请求，包含查询编码、检索、融合和选段。该基准衡量证据召回和本机查询用时，线上 HTTP 耗时另计。
+
 ### 首次使用与部署
 
 **首次使用，请先导入想延续的历史对话。** 新工作区从空白开始。导入获准的本地历史后，旧对话中的事实和决定才会进入可召回的记忆库。
@@ -55,6 +72,23 @@ OpenViking supplies storage, vector retrieval, sessions, and MCP. Verda builds o
 ### Example
 
 In a synthetic test project, the agent asks for the **data split** and the **preregistered sensor protocol**. Verda retrieves the passage documenting **70% / 15% / 15%** for train, validation, and test. It reports `fact_coverage.missing: [2]`, so the agent can answer the first item and flag the second for verification.
+
+### Local vector retrieval on CPU
+
+**Memory search can run entirely on the local CPU, with no paid external search or embedding API required.** The reference machine uses OpenViking's built-in local vector database (`storage.vectordb.backend=local`). On November 19, 2026, the active vector collection occupied **29.1 MiB**, including about **10.0 MiB** of vector index files. Model weights and source transcripts are stored separately. See the [OpenViking local embedding settings](https://docs.openviking.ai/en/guides/01-configuration#local-provider-local).
+
+For a lightweight setup, **BGE-small-zh-v1.5 F16 GGUF** has a measured weight file of **45.7 MiB** and produces 512-dimensional vectors. The author's long-session deployment uses **BGE-M3 FP32**, which produces 1,024-dimensional vectors and runs with two CPU inference threads. History extraction and optional summaries follow the configured model provider.
+
+#### Local benchmark
+
+AMD Ryzen 7 9800X3D, two CPU threads. The offline comparison used 457 redacted sources and 2,268 passages. Both runs fused dense vector retrieval with BM25 keyword search.
+
+| Embedding model | FP32 weights | Complete-evidence Hit@5 | Warm query mean / p95 | Query process RSS |
+| --- | ---: | ---: | ---: | ---: |
+| [BGE-base-zh-v1.5](https://huggingface.co/BAAI/bge-base-zh-v1.5) | 390 MiB | 69.0% (29/42) | 0.224 / 0.455 s | 0.77 GiB |
+| [BGE-M3](https://huggingface.co/BAAI/bge-m3) | 2.12 GiB | **81.0% (34/42)** | **0.431 / 1.028 s** | 1.84 GiB |
+
+Hit@5 measures whether complete reference evidence appeared among the top five results on 42 positive questions. Each latency run used 36 warm requests and included query encoding, retrieval, fusion, and passage selection. The benchmark measures evidence retrieval and local query time. Production HTTP latency is measured separately.
 
 ### First use and deployment
 
