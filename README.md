@@ -69,6 +69,22 @@ Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据�
 
 2026 年 10 月 29 日，本机先比较了 base、M3、每次双模型和按需双模型，再选定 M3。它在这批题中找回的完整证据最多，并且只需驻留一个嵌入模型。在 6 道自然长请求里，base 命中 3 道，M3 命中 5 道。切换时用 M3 建了独立的 **1024 维向量集合**，迁入 **2,094 条**记录并核对元数据和权限，保留旧集合用于回滚。两版都使用 OpenViking 的本地向量数据库后端。
 
+### 记忆系统本机对照
+
+题型参考了作者真实 Codex 长对话中遇到的实验配置核对和跨项目召回问题。基准由 29 条合成事实和 24 道固定题组成，在本机隔离运行。Verda、原版 OpenViking、Bigeye 和 Mem0 OSS 都使用本地 BGE-M3，灵枢使用默认 MCP 召回。按最多 5 项、1,500 token 的统一预算评价返回的证据。
+
+**Verda 的优势是让当前决定更容易从历史中取准，同时少占用上下文。** 本轮四道当前决定题全部找齐，且没有带入指定的旧值或其他项目值。相比使用相同嵌入模型的原版 OpenViking，返回上下文的中位数减少约 **96%**。
+
+| 实测指标 | 本项领先 | Verda | 原版 OpenViking | 灵枢 | Bigeye | Mem0 OSS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 找到当前决定，且没有带回混淆值 | **Verda** | **4/4** | 0/4 | 1/4 | 0/4 | 0/4 |
+| 带回指定旧值或其他项目值的题数 | **Verda，最少** | **1/24** | 10/24 | 7/24 | 7/24 | 7/24 |
+| 返回的上下文，中位数 | **Verda，最短** | **40 token** | 992 token | 1,500 token（达到评分上限） | 142 token | 141 token |
+| 找齐整道题的全部证据 | **Mem0 OSS** | 9/20 | 9/20 | 17/20 | 17/20 | **19/20** |
+| 查询延迟，中位数 / p95 | **灵枢，两项最快** | 75 / 257 ms | 201 / 218 ms | **35 / 42 ms** | 295 / 374 ms | 139 / 157 ms |
+
+这次 Verda 只用约 **0.57B 参数**的 BGE-M3 在 CPU 上做嵌入，权重约 **2.12 GiB**，召回阶段额外生成模型调用为 **0 次**。Verda 的核心 wheel 为 **77.4 KiB**，依赖和模型另行安装。作为模型规模参考，Hindsight 的端到端论文评估了 **20B 和 120B 档生成模型**。论文的答题成绩按其端到端协议统计。[BGE-M3 模型卡](https://huggingface.co/BAAI/bge-m3) · [Hindsight 论文表 2](https://aclanthology.org/2026.acl-demo.27.pdf)
+
 ### DSH 桌面与 Web 实测
 
 在 DeepSeek Harness `0.2.2-rc.5` 与 OpenViking 记忆插件 `0.5.39` 上，已分别从 **Windows 原生 Desktop** 和 **WSL Web 界面**发起实际对话。两边都验证了三件事。
@@ -159,6 +175,22 @@ Hit@5 measures whether complete reference evidence appeared among the top five r
 The earlier deployment used **BGE-small-zh-v1.5 F16 GGUF** with 512-dimensional vectors. Its preserved vector collection occupies **10.8 MiB**. Before switching, it passed 10 live recall checks. **Five recovered the expected fact, and five correctly returned empty.** Those checks verified the behavior of the earlier deployment. The 42 positive questions above compare the later candidates on the same questions.
 
 On October 29, 2026, the author compared base, M3, always running both models, and selective M3 routing before choosing M3. It recovered the most complete evidence on this test set and required just one resident embedding model. On six naturally phrased long requests, base covered three and M3 covered five. The migration built a separate **1,024-dimensional collection**, moved **2,094 records** with metadata and access checks, and kept the old collection for rollback. Both versions use OpenViking's local vector database backend.
+
+### Local comparison of memory systems
+
+The questions reflect experiment configuration checks and cross-project recall problems encountered in the author's real Codex conversations. The benchmark used 29 synthetic facts and 24 fixed questions, run in isolation on the author's machine. Verda, upstream OpenViking, Bigeye, and Mem0 OSS all used local BGE-M3. LingShu used its default MCP recall. Evidence was scored under a shared budget of up to five items and 1,500 tokens.
+
+**Verda's strength is keeping current decisions clear while using less context.** It retrieved the current decision on all four questions without returning the specified stale values or values from other projects. Its median retrieved context was **about 96% shorter** than upstream OpenViking's with the same embedder.
+
+| Measured outcome | Leader | Verda | Upstream OpenViking | LingShu | Bigeye | Mem0 OSS |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Current decision retrieved with no conflicting value | **Verda** | **4/4** | 0/4 | 1/4 | 0/4 | 0/4 |
+| Questions returning a specified stale or cross-project value | **Verda, fewest** | **1/24** | 10/24 | 7/24 | 7/24 | 7/24 |
+| Median retrieved context | **Verda, shortest** | **40 tokens** | 992 tokens | 1,500 tokens (at the scoring cap) | 142 tokens | 141 tokens |
+| Questions with all required evidence retrieved | **Mem0 OSS** | 9/20 | 9/20 | 17/20 | 17/20 | **19/20** |
+| Query latency, median / p95 | **LingShu, fastest on both** | 75 / 257 ms | 201 / 218 ms | **35 / 42 ms** | 295 / 374 ms | 139 / 157 ms |
+
+In this run, Verda used BGE-M3 for embedding on CPU, with about **0.57B parameters**, **2.12 GiB** of weights, and **zero additional generative model calls** during recall. Verda's core wheel is **77.4 KiB**. Dependencies and model weights are installed separately. For model-scale context, the Hindsight paper evaluates **20B and 120B generative backbones**. Its answer accuracy follows its own end-to-end evaluation protocol. [BGE-M3 model card](https://huggingface.co/BAAI/bge-m3) · [Hindsight paper, Table 2](https://aclanthology.org/2026.acl-demo.27.pdf)
 
 ### DSH Desktop and Web verification
 
