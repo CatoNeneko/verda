@@ -75,6 +75,8 @@ Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据�
 
 Codex、DeepSeek Harness 和通用 MCP 各有接入包，共用同一个核心。原生 Windows x64 和 WSL Linux 已通过隔离安装、召回和回滚测试。把 [Agent 部署指南](docs/INSTALL.md#中文) 发给负责部署的 Agent，选包、导入历史和验证的步骤都在里面。
 
+如果 Verda 用起来顺手，帮你解决了长对话里的记忆问题，欢迎给项目点个 ⭐ Star。
+
 ## English
 
 **Verda is designed for very long conversations.** It is a long-term memory layer for agents built on OpenViking, aimed at research and development that involves repeated fact-checking and work across sessions. The author has used this version to manage many long conversations and found it useful in everyday work.
@@ -147,6 +149,8 @@ On October 29, 2026, the author compared base, M3, always running both models, a
 **Import the conversation history you want to carry forward.** A new workspace starts empty. Import approved local history to make facts and decisions from earlier sessions available for recall.
 
 Codex, DeepSeek Harness, and generic MCP bundles share one core. Isolated install, recall, and rollback were tested on native Windows x64 and WSL Linux. Give the [Agent Deployment Guide](docs/INSTALL.md#english) to the deploying agent for bundle selection, history import, and verification.
+
+If Verda helps you keep track of long conversations and solves a real problem for you, a ⭐ star is appreciated.
 
 ---
 
