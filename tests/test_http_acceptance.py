@@ -217,6 +217,10 @@ class HttpAcceptanceTest(unittest.TestCase):
         self.fail(f"vdra server did not become ready; last error: {last_error!r}")
 
     def test_source_write_cross_session_recall_and_missing_evidence(self) -> None:
+        from vdra.fact_evidence import digest, source_text
+        from vdra.vdra_state import atomic_json
+        from vdra.work_focus import add_edge
+
         status, health, _ = self._request("GET", "/health")
         self.assertEqual(status, 200)
         self.assertTrue(health.get("healthy"))
@@ -295,6 +299,54 @@ class HttpAcceptanceTest(unittest.TestCase):
             "dsh-alpha-two",
         )
         self.assertTrue(gap["stats"]["fact_coverage"]["missing"], gap["stats"])
+
+        # Keep this source unindexed so only the explicit relation can find it.
+        linked_dir = facts_uri.removesuffix(".md")
+        linked_uri = linked_dir + "/seed.md"
+        quote = "The dataset split decision depends on this recorded random seed."
+        linked_text = f"# Garden Study protocol\nRandom seed: 5712.\n{quote}\n"
+        code, made, _ = self._request("POST", "/api/v1/fs/mkdir", {"uri": linked_dir})
+        self.assertEqual(code, 200, made)
+        code, saved, _ = self._request(
+            "POST",
+            "/api/v1/content/batch-write",
+            {
+                "root_uri": linked_dir,
+                "operations": [{"uri": linked_uri, "content": linked_text, "mode": "upsert"}],
+                "defer_processing": True,
+                "wait": True,
+            },
+        )
+        self.assertEqual(code, 200, saved)
+        self.assertEqual(saved["status"], "ok")
+        query_with_gap = "For Garden Study, list the dataset split and the random seed."
+        without_edge = recall(query_with_gap, "dsh-alpha-no-relation")
+        self.assertTrue(without_edge["stats"]["fact_coverage"]["missing"])
+        self.assertNotIn("5712", without_edge["rendered"])
+
+        state_path = self.root / "work-state.json"
+        states = json.loads(state_path.read_text(encoding="utf-8"))
+        linked_hash = digest(source_text(linked_text))
+        states["dsh-alpha-edge-owner"] = add_edge(
+            {"project": "garden-study"},
+            source_uri=facts_uri,
+            target_uri=linked_uri,
+            relation="depends_on",
+            source_hash=digest(source_text(facts)),
+            target_hash=linked_hash,
+            evidence_uri=linked_uri,
+            evidence_hash=linked_hash,
+            evidence_quote=quote,
+            evidence_date="2026-11-19",
+            evidence_status="current",
+            status="current",
+        )
+        atomic_json(state_path, states)
+        linked = recall(query_with_gap, "dsh-alpha-with-relation")
+        self.assertEqual(linked["stats"]["explicit_relations"]["accepted"], 1)
+        self.assertEqual(linked["stats"]["explicit_relations"]["hops"], 1)
+        self.assertEqual(linked["stats"]["fact_coverage"]["missing"], [])
+        self.assertIn("5712", linked["rendered"])
 
         asyncio.run(self._check_mcp(query))
 

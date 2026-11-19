@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import date, datetime, timezone
 
-from .recall_policy import (
-    MIN_LEXICAL_SUPPORT,
-    QueryPlan,
-    historical_query,
-    requires_live_evidence,
-)
+from .fact_terms import DATE_FIELD_NAMES, SECTION_FIELD_RE
+from .recall_policy import MIN_LEXICAL_SUPPORT, QueryPlan
 
 # These are document-section roles, independent of the user's wording. Facts
 # and provenance remain together on disk; only fact sections enter recall.
@@ -65,9 +62,19 @@ _SNAPSHOT_TAG = re.compile(
     r"^\s*\[(?:历史(?:阶段)?快照|historical snapshot)[^\]]*\]", re.I
 )
 _EXPLICIT_STATUS = re.compile(
-    r"^\s*(?:(?:[-*+]\s*)?(?:有效性|状态)[：:]\s*(?:已取代|已撤销|已失效|superseded|revoked)|"
-    r"(?:[-*+]\s*)?\[(?=[^\]]*(?:已取代|已撤销|已失效|superseded|revoked))[^\]]+\])",
+    r"^\s*(?:(?:[-*+]\s*)?(?:有效性|状态|status)[：:]\s*"
+    r"(?:已取代|已撤销|已失效|已过期|superseded|revoked|expired)|"
+    r"(?:[-*+]\s*)?\[(?=[^\]]*(?:已取代|已撤销|已失效|已过期|superseded|revoked|expired))[^\]]+\])",
     re.I,
+)
+_DATE_FIELD_RE = re.compile(
+    rf"^[ \t]*(?:[-*+][ \t]+)?(?P<field>{DATE_FIELD_NAMES})[：:][ \t]*"
+    r"(?P<date>\d{4}-\d{2}-\d{2})[ \t]*$",
+    re.I | re.M,
+)
+_END_DATE_RE = re.compile(
+    r"(?:\b(?:superseded|revoked|expired)\s+on\s+"
+    r"|(?:取代|失效|过期)日期[：:]\s*)(\d{4}-\d{2}-\d{2})\b", re.I
 )
 SUGGESTION = re.compile(
     r"建议|提议|调研|调查|计划|讨论中|尚未(?:实现|实施|验证|实测)|待验证|hypothesis|proposal",
@@ -117,11 +124,39 @@ def _source_snapshot_superseded(text):
 def _section_superseded(heading, body):
     if SUPERSEDED.search(heading):
         return True
-    lines = body.splitlines()
-    if not lines:
+    for line in body.splitlines():
+        if _EXPLICIT_STATUS.match(line):
+            return True
+        if not SECTION_FIELD_RE.match(line):
+            break
+    return False
+
+
+def section_applicable(heading, body, plan):
+    superseded = _section_superseded(heading, body)
+    if superseded and not plan.historical:
         return False
-    first = re.sub(r"^\s*(?:[-*+]\s*)?", "", lines[0])
-    return bool(_EXPLICIT_STATUS.match(first))
+    if plan.historical and plan.as_of is None:
+        return True
+    dates: dict[str, list[date]] = {}
+    try:
+        for match in _DATE_FIELD_RE.finditer(body):
+            field = re.sub(r"[ -]", "_", match["field"].casefold())
+            dates.setdefault(field, []).append(date.fromisoformat(match["date"]))
+        ends = dates.get("valid_until", [])
+        if superseded:
+            match = _END_DATE_RE.search(body)
+            if match:
+                ends.append(date.fromisoformat(match[1]))
+    except ValueError:
+        return False
+    starts = dates.get("valid_from") or dates.get("date", []) + dates.get("日期", [])
+    if not starts and not ends:
+        return True
+    target_date = plan.as_of or datetime.now(timezone.utc).date()
+    return all(start <= target_date for start in starts) and all(
+        target_date < end for end in ends
+    )
 
 
 def paragraphs_with_headings(text):
@@ -129,10 +164,29 @@ def paragraphs_with_headings(text):
     text = evidence_content(text)
     text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)
     text = re.sub(r"<!--\s*MEMORY_FIELDS\b.*?-->", "", text, flags=re.S)
-    headings = []
+    scopes = [(0, "", [])]
     title = ""
     intro = []
     out = []
+
+    def append_paragraph(lines):
+        value = "\n".join(lines).strip()
+        if not value:
+            return
+        heading = "\n".join(label for _, label, _ in scopes if label)
+        if (
+            not heading
+            and not intro
+            and re.match(r"^(?:共同)?来源[：:]|^维护说明[：:]", value)
+            and len(value) < 700
+        ):
+            intro.append(value)
+        elif all(SECTION_FIELD_RE.match(line) for line in value.splitlines()):
+            scopes[-1][2].append(value)
+        else:
+            metadata = [field for _, _, fields in scopes for field in fields]
+            out.append((heading, "\n".join([*metadata, value])))
+
     for block in re.split(r"\n\s*\n", text):
         lines = block.strip().splitlines()
         body = []
@@ -140,41 +194,30 @@ def paragraphs_with_headings(text):
             match = re.match(r"^(#{1,6})\s+(.+)", line)
             if match:
                 if body:
-                    out.append(("\n".join(headings), "\n".join(body)))
+                    append_paragraph(body)
                     body = []
                 depth = len(match[1])
                 if depth == 1 and not title:
                     title = line
-                headings = [h for h in headings if len(h.split(" ", 1)[0]) < depth]
-                if depth > 1:
-                    headings.append(line)
+                while scopes[-1][0] >= depth:
+                    scopes.pop()
+                scopes.append((depth, line if depth > 1 else "", []))
             else:
                 body.append(line)
-        if body:
-            value = "\n".join(body).strip()
-            if (
-                not headings
-                and len(intro) < 1
-                and re.match(r"^(?:共同)?来源[：:]|^维护说明[：:]", value)
-                and len(value) < 700
-            ):
-                intro.append(value)
-            else:
-                out.append(("\n".join(headings), value))
+        append_paragraph(body)
     return "\n\n".join([x for x in [title, *intro] if x]), out
 
 
 def select_facts(text: str, plan: QueryPlan, *, lexical_only: bool = False) -> str:
     head, chunks = paragraphs_with_headings(text)
-    historical = historical_query(plan.raw)
-    if _source_snapshot_superseded(text) and not historical:
+    if _source_snapshot_superseded(text) and not plan.historical:
         return ""
     requests = plan.fact_requests
     score_section = plan.support if lexical_only else plan.section_support
     scored = []
     for index, (heading, body) in enumerate(chunks):
         scoped = "\n\n".join(x for x in (heading, body) if x)
-        if _section_superseded(heading, body) and not historical:
+        if not section_applicable(heading, body, plan):
             continue
         score = score_section(scoped)
         if score:
@@ -210,7 +253,7 @@ def covered_fact_requests(text: str, plan: QueryPlan) -> set[int]:
         for heading, body in paragraphs_with_headings(text)[1]:
             if "[展开原文见来源URI]" in body:
                 continue
-            if _section_superseded(heading, body) and not plan.historical:
+            if not section_applicable(heading, body, plan):
                 continue
             found.update(plan.covered_requests(heading + "\n" + body))
     return found
@@ -228,9 +271,9 @@ def prepare_body(
     text = evidence_content(text)
     if not text:
         return ""
-    historical = historical_query(plan.raw)
+    historical = plan.historical
     label = evidence_label(text, uri)
-    if "/events/" in uri and requires_live_evidence(plan.raw) and not historical:
+    if "/events/" in uri and plan.requires_live and not historical:
         return ""
     if project_fact or "/projects/" in uri:
         source_is_superseded = _source_snapshot_superseded(text)
@@ -243,12 +286,9 @@ def prepare_body(
             # An authorized, hash-checked, bounded passage can lack lexical
             # overlap in a foreign-language query. Preserve that passage only;
             # native scores and whole-card bodies never set this flag.
-            if (
-                any(
-                    _section_superseded(heading, body)
-                    for heading, body in paragraphs_with_headings(text)[1]
-                )
-                and not historical
+            if any(
+                not section_applicable(heading, body, plan)
+                for heading, body in paragraphs_with_headings(text)[1]
             ):
                 return ""
         else:

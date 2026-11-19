@@ -69,7 +69,7 @@ Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据�
 
 2026 年 10 月 29 日，本机先比较了 base、M3、每次双模型和按需双模型，再选定 M3。它在这批题中找回的完整证据最多，并且只需驻留一个嵌入模型。在 6 道自然长请求里，base 命中 3 道，M3 命中 5 道。切换时用 M3 建了独立的 **1024 维向量集合**，迁入 **2,094 条**记录并核对元数据和权限，保留旧集合用于回滚。两版都使用 OpenViking 的本地向量数据库后端。
 
-### 记忆系统本机对照
+### 记忆系统本机对照（v0.1.0a2）
 
 题型参考了作者真实 Codex 长对话中遇到的实验配置核对和跨项目召回问题。基准由 29 条合成事实和 24 道固定题组成，在本机隔离运行。Verda、原版 OpenViking、Bigeye 和 Mem0 OSS 都使用本地 BGE-M3，灵枢使用默认 MCP 召回。按最多 5 项、1,500 token 的统一预算评价返回的证据。
 
@@ -84,6 +84,21 @@ Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据�
 | 查询延迟，中位数 / p95 | **灵枢，两项最快** | 75 / 257 ms | 201 / 218 ms | **35 / 42 ms** | 295 / 374 ms | 139 / 157 ms |
 
 这次 Verda 只用约 **0.57B 参数**的 BGE-M3 在 CPU 上做嵌入，权重约 **2.12 GiB**，召回阶段额外生成模型调用为 **0 次**。Verda 的核心 wheel 为 **77.4 KiB**，依赖和模型另行安装。作为模型规模参考，Hindsight 的端到端论文评估了 **20B 和 120B 档生成模型**。论文的答题成绩按其端到端协议统计。[BGE-M3 模型卡](https://huggingface.co/BAAI/bge-m3) · [Hindsight 论文表 2](https://aclanthology.org/2026.acl-demo.27.pdf)
+
+#### 召回修复回归（2026-11-20）
+
+基于从作者真实长对话归纳出的同一组 29 条合成事实和 24 道题，对 Verda 旧版和本次源码更新做隔离 HTTP 回放。两边使用相同的确定性测试向量和上下文预算，检验召回规则的变化。上方 BGE-M3 的跨系统对照保留 v0.1.0a2 实测结果。
+
+| 固定题集指标 | v0.1.0a2 基线 | 修复后，原配置 | 修复后，登记测试项目中文别名 |
+| --- | ---: | ---: | ---: |
+| 有证据题找齐所需事实且无指定混淆值 | 9/20 | **18/20** | **20/20** |
+| 多事实题完整命中 | 0/4 | **3/4** | **4/4** |
+| 跨语言题完整命中 | 0/3 | **3/3** | **3/3** |
+| 指定历史时点题完整命中 | 0/1 | **1/1** | **1/1** |
+| 缺证据题正确留空 | 1/4 | **4/4** | **4/4** |
+| 返回上下文中位数 | 40 token | 58.5 token | 59 token |
+
+原配置下剩余两题用了同一个未登记的中文别名。登记后两题均找齐证据。本次更新让明确项目的多事实查询逐项核对证据正文，使用共享的双语术语，按查询日期和章节有效期选取事实，并修通了一跳关联召回。13 项测试通过，其中 HTTP 用例验证了一跳补齐尚未单独建索引的跨会话事实。[规则回归](tests/test_recall_policy.py) · [HTTP/MCP 验收](tests/test_http_acceptance.py)
 
 ### DSH 桌面与 Web 实测
 
@@ -176,7 +191,7 @@ The earlier deployment used **BGE-small-zh-v1.5 F16 GGUF** with 512-dimensional 
 
 On October 29, 2026, the author compared base, M3, always running both models, and selective M3 routing before choosing M3. It recovered the most complete evidence on this test set and required just one resident embedding model. On six naturally phrased long requests, base covered three and M3 covered five. The migration built a separate **1,024-dimensional collection**, moved **2,094 records** with metadata and access checks, and kept the old collection for rollback. Both versions use OpenViking's local vector database backend.
 
-### Local comparison of memory systems
+### Local comparison of memory systems (v0.1.0a2)
 
 The questions reflect experiment configuration checks and cross-project recall problems encountered in the author's real Codex conversations. The benchmark used 29 synthetic facts and 24 fixed questions, run in isolation on the author's machine. Verda, upstream OpenViking, Bigeye, and Mem0 OSS all used local BGE-M3. LingShu used its default MCP recall. Evidence was scored under a shared budget of up to five items and 1,500 tokens.
 
@@ -191,6 +206,21 @@ The questions reflect experiment configuration checks and cross-project recall p
 | Query latency, median / p95 | **LingShu, fastest on both** | 75 / 257 ms | 201 / 218 ms | **35 / 42 ms** | 295 / 374 ms | 139 / 157 ms |
 
 In this run, Verda used BGE-M3 for embedding on CPU, with about **0.57B parameters**, **2.12 GiB** of weights, and **zero additional generative model calls** during recall. Verda's core wheel is **77.4 KiB**. Dependencies and model weights are installed separately. For model-scale context, the Hindsight paper evaluates **20B and 120B generative backbones**. Its answer accuracy follows its own end-to-end evaluation protocol. [BGE-M3 model card](https://huggingface.co/BAAI/bge-m3) · [Hindsight paper, Table 2](https://aclanthology.org/2026.acl-demo.27.pdf)
+
+#### Recall regression (2026-11-20)
+
+The isolated HTTP replay compared the previous Verda version with this source update on the same 29 synthetic facts and 24 questions derived from the author's long conversations. The runs used identical deterministic test vectors and the same context budget to measure changes in recall rules. The BGE-M3 comparison above records the v0.1.0a2 cross-system results.
+
+| Fixed-suite metric | v0.1.0a2 baseline | Fixed, original config | Fixed, with the test project's Chinese alias |
+| --- | ---: | ---: | ---: |
+| All required evidence retrieved with no specified conflicting value | 9/20 | **18/20** | **20/20** |
+| Multi-fact questions with complete evidence | 0/4 | **3/4** | **4/4** |
+| Cross-language questions with complete evidence | 0/3 | **3/3** | **3/3** |
+| As-of-date question with complete evidence | 0/1 | **1/1** | **1/1** |
+| Unsupported questions correctly left empty | 1/4 | **4/4** | **4/4** |
+| Median retrieved context | 40 tokens | 58.5 tokens | 59 tokens |
+
+The two remaining misses used the same unregistered Chinese project alias. Registering it resolved both. This update checks each requested fact against the evidence body, shares bilingual fact vocabulary between queries and evidence, applies section validity to dated lookups, and restores one-hop relation recall. All 13 tests passed, including an HTTP check in which one hop filled a gap using a fact linked from another session with no separate index entry. [Recall regression tests](tests/test_recall_policy.py) · [HTTP/MCP acceptance test](tests/test_http_acceptance.py)
 
 ### DSH Desktop and Web verification
 

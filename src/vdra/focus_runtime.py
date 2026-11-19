@@ -60,14 +60,14 @@ def checkpoint_focus(state, session, data):
 
 
 async def linked_entries(
-    *, state, project, seeds, plan, cfg, service, ctx, excluded, root, notes=None
+    *, state, project, seeds, plan, cfg, service, ctx, excluded, notes=None
 ):
     """One hop only. Permissions, source hashes and topical evidence remain required."""
     from openviking.retrieve.context_assembler.models import AssembledEntry
 
     from .fact_evidence import digest, prepare_body, project_for_uri, source_text
     from .vdra_state import read_states
-    from .recall_policy import STRONG_LEXICAL_SUPPORT, historical_query
+    from .recall_policy import STRONG_LEXICAL_SUPPORT
 
     # Reuse the same project relation records across chats, without replaying
     # their task snapshots or importing another chat's unfinished work.
@@ -80,7 +80,7 @@ async def linked_entries(
                     edges.extend(other.get("edges", []))
         except (OSError, ValueError):
             pass
-    historical = historical_query(plan.raw)
+    historical = plan.historical
     graph = {"edges": edges}
     out = []
     seen = {e.uri for e in seeds}

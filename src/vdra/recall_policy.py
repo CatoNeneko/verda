@@ -13,6 +13,8 @@ from datetime import date
 from typing import Any, Mapping
 from urllib.parse import unquote
 
+from .fact_terms import evidence_topics, fact_topics
+
 MIN_LEXICAL_SUPPORT = 0.16
 STRONG_LEXICAL_SUPPORT = 0.60
 NATIVE_SEMANTIC_FLOOR = 0.82
@@ -195,16 +197,27 @@ def evidence_terms(text: str) -> set[str]:
     return terms(text)
 
 
+def _alias_pattern(name: str) -> str:
+    pattern = re.escape(name)
+    if name[0].isascii() and name[0].isalnum():
+        pattern = r"(?<![a-zA-Z0-9_])" + pattern
+    if name[-1].isascii() and name[-1].isalnum():
+        pattern += r"(?![a-zA-Z0-9_])"
+    return pattern
+
+
 def _project_from_aliases(
     text: str, cfg: Mapping[str, Any] | None, *, single_project: bool = False
 ) -> str:
     scores = []
-    folded = str(text or "").casefold()
+    text = str(text or "")
     for key, project in (cfg or {}).get("projects", {}).items():
         score = sum(
             max(1, len(alias))
             for alias in project.get("aliases", [])
-            if isinstance(alias, str) and alias.casefold() in folded
+            if isinstance(alias, str)
+            and alias.strip()
+            and re.search(_alias_pattern(alias), text, re.I)
         )
         if score:
             scores.append((score, key))
@@ -318,7 +331,9 @@ def needs_resume(query: str) -> bool:
     )
 
 
-def retrieval_needed(query: str, cfg: Mapping[str, Any] | None = None) -> bool:
+def retrieval_needed(
+    query: str, cfg: Mapping[str, Any] | None = None, *, project_fact_lookup: bool = False
+) -> bool:
     query = str(query or "")
     if re.match(r"^(?:我(?:说|指|问)的是|你(?:理解错|误解|答偏))", query):
         return False
@@ -347,6 +362,8 @@ def retrieval_needed(query: str, cfg: Mapping[str, Any] | None = None) -> bool:
         or _CURRENT_REQUEST_RE.search(query)
     ):
         return False
+    if project_fact_lookup:
+        return True
     if _LOOKUP_VERB_RE.search(query) and _QUESTION_FORM_RE.search(query):
         return True
     if _ENGLISH_SOURCE_REFERENCE_RE.search(query) or _ENGLISH_PAST_RECALL_RE.search(
@@ -391,7 +408,8 @@ def retrieval_needed(query: str, cfg: Mapping[str, Any] | None = None) -> bool:
 def authorization_lookup(query: str) -> bool:
     return bool(
         re.search(
-            r"授权|获准|允许|同意|批准|权限|限制|(?:能|可).{0,12}(?:启动|删除|续接|继续|使用)",
+            r"授权|获准|允许|同意|批准|权限|限制|(?:能|可).{0,12}(?:启动|删除|续接|继续|使用)"
+            r"|\b(?:authorization|permission|approval)\b",
             str(query or ""),
         )
     )
@@ -456,16 +474,61 @@ class SourceAssessment:
 
 _QUANTITY_RE = re.compile(r"(?<![0-9A-Za-z_.])[+-]?\d+(?:\.\d+)?%?(?![0-9A-Za-z_.])")
 _FACT_IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9_+-]*(?:/\d+)?", re.I)
-_AS_OF_RE = re.compile(r"(?:截至|截止到|\bas of)\s*(\d{4}-\d{2}-\d{2})(?!\d)", re.I)
+_EXPLICIT_IDENTIFIER_RE = re.compile(
+    r"\b(?:[A-Z]{2,}[0-9]*|[a-zA-Z][a-zA-Z0-9]*_[a-zA-Z0-9_]+"
+    r"|[a-zA-Z][a-zA-Z0-9]*-[0-9][a-zA-Z0-9-]*)\b"
+)
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        "january february march april may june july august september october november december".split(),
+        1,
+    )
+}
+_MONTH_NAME = r"(?:" + "|".join(_MONTHS) + r")"
+_ENGLISH_DATE = rf"{_MONTH_NAME}\s+\d{{1,2}}(?:,\s*|\s+)\d{{4}}"
+_CHINESE_DATE = r"\d{4}年\s*\d{1,2}月\s*\d{1,2}日"
+_AS_OF_RE = re.compile(
+    rf"(?:截至|截止到|\bas of\b|\bon\b)\s*"
+    rf"(?P<date>\d{{4}}-\d{{2}}-\d{{2}}|{_ENGLISH_DATE}|{_CHINESE_DATE})(?!\d)",
+    re.I,
+)
+_DATE_WORDS_RE = re.compile(
+    rf"\b{_MONTH_NAME}\s+\d{{1,2}}\b(?:,\s*\d{{4}})?|{_CHINESE_DATE}",
+    re.I,
+)
+_PROJECT_LOOKUP_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:what|which|where|when|how|does|did|is|are|"
+    r"list|find|give|retrieve|show|check|verify|compare|look up|report|confirm)\b"
+    r"|^\s*(?:请(?:帮忙)?\s*)?(?:查证|核对|列出|找出|查找|给出|对照(?!模型|组)|比较)",
+    re.I,
+)
+_EXPLICIT_FACT_BREAK_RE = re.compile(r"[；;]|\n(?=\s*(?:[-*]\s|\d+[.、)]\s*))")
+_FACT_BREAK_RE = re.compile(r"[,，、]|\band\b|\bplus\b|以及|和|及", re.I)
+_ENUMERATED_LOOKUP_RE = re.compile(r"^\s*(?:please\s+)?list\b|分别|逐项|列出", re.I)
+
+
+def _strip_lookup_dates(text: str) -> str:
+    return _DATE_WORDS_RE.sub(" ", _AS_OF_RE.sub(" ", text))
 
 
 def requested_date(query: str) -> date | None:
-    dates = set(_AS_OF_RE.findall(query))
-    if len(dates) == 1:
+    dates = set()
+    for match in _AS_OF_RE.finditer(query):
+        value = match["date"]
         try:
-            return date.fromisoformat(dates.pop())
+            if "-" in value:
+                parsed = date.fromisoformat(value)
+            elif "年" in value:
+                parsed = date(*map(int, re.findall(r"\d+", value)))
+            else:
+                month, day, year = re.split(r"[,\s]+", value.casefold())
+                parsed = date(int(year), _MONTHS[month], int(day))
         except ValueError:
-            pass
+            return None
+        dates.add(parsed)
+    if len(dates) == 1:
+        return dates.pop()
     return None
 
 
@@ -479,6 +542,7 @@ class FactRequest:
     quantities: frozenset[str]
     stages: frozenset[str]
     identifiers: frozenset[str]
+    topics: frozenset[str] = frozenset()
 
     def support(self, text: str) -> float:
         if not self.quantities <= quantities(text):
@@ -487,40 +551,63 @@ class FactRequest:
             _FACT_IDENTIFIER_RE.findall(text.casefold())
         ):
             return 0.0
+        if self.topics:
+            return float(
+                self.topics <= evidence_topics(text) and self.stages <= _stage_values(text)
+            )
         return _lexical_support(self.terms, text, frozenset(), self.stages)[0]
 
 
+def _without_project_aliases(text: str, aliases) -> str:
+    names = [name for name in aliases if isinstance(name, str) and name.strip()]
+    for name in sorted(names, key=len, reverse=True):
+        text = re.sub(_alias_pattern(name), " ", text, flags=re.I)
+    return text
+
+
 def split_fact_requests(text: str, project: str) -> tuple[FactRequest, ...]:
-    """Recognize explicitly separated research lookups without generating queries."""
-    if not project or not re.search(
-        r"核对|查证|列出|分别|对照|比较|\bcompare\b|\bverify\b", text, re.I
+    """Extract named project fact requests, including explicit missing subjects."""
+    subject = re.sub(r"^\s*(?:for\b|的)\s*", "", text, flags=re.I).lstrip(" \t,:，：")
+    if not project or not (
+        _PROJECT_LOOKUP_RE.search(subject)
+        or (_QUESTION_FORM_RE.search(subject) and fact_topics(subject))
     ):
-        return ()
-    chunks = re.split(r"[；;]|\n(?=\s*(?:[-*]\s|\d+[.、)]\s*))", text)
-    if not 2 <= len(chunks) <= 5:
         return ()
     # Keep questions mixing present and past on the existing path.
     if _history_cue(text) and re.search(r"当前|现在|目前|\bcurrent\b", text, re.I):
         return ()
+    chunks = _EXPLICIT_FACT_BREAK_RE.split(subject)
+    if len(chunks) == 1:
+        topics = fact_topics(subject)
+        if not topics:
+            return ()
+        if len(topics) > 1 or _ENUMERATED_LOOKUP_RE.search(subject):
+            parts = [chunk for chunk in _FACT_BREAK_RE.split(subject) if chunk.strip()]
+            if len(parts) > 1 and any(len(fact_topics(chunk)) > 1 for chunk in parts):
+                return ()
+            chunks = parts
+    if not 1 <= len(chunks) <= 5:
+        return ()
     requests = []
     for chunk in chunks:
         chunk = re.sub(r"^\s*(?:[-*]\s+|\d+[.、)]\s*)", "", chunk).strip()
-        chunk = re.sub(
-            r"核对|查证|列出|分别|对照|比较|\bcompare\b|\bverify\b",
-            " ",
-            chunk,
-            flags=re.I,
-        )
+        chunk = _PROJECT_LOOKUP_RE.sub(" ", chunk)
+        chunk = re.sub(r"分别", " ", chunk)
+        topics = fact_topics(chunk)
         wanted = frozenset(focus_terms(chunk))
-        if len(wanted - _DOMAIN_TERMS) < 2:
+        if not topics and len(wanted - _DOMAIN_TERMS) < 2:
             return ()
-        identifiers = frozenset(
-            word
-            for word in _FACT_IDENTIFIER_RE.findall(chunk.casefold())
-            if word in wanted or "/" in word
-        )
+        if topics:
+            identifiers = frozenset(
+                word.casefold() for word in _EXPLICIT_IDENTIFIER_RE.findall(chunk)
+            )
+        else:
+            identifiers = frozenset(
+                word for word in _FACT_IDENTIFIER_RE.findall(chunk.casefold())
+                if word in wanted or "/" in word
+            )
         requests.append(
-            FactRequest(wanted, quantities(chunk), _stage_values(chunk), identifiers)
+            FactRequest(wanted, quantities(chunk), _stage_values(chunk), identifiers, topics)
         )
     return tuple(requests)
 
@@ -745,17 +832,33 @@ def analyze(
     project, confident = _project_query(raw, cfg)
     if not project and project_hint:
         project, confident = str(project_hint), False
+    aliases = (
+        (cfg or {}).get("projects", {}).get(project, {}).get("aliases", [])
+        if confident
+        else []
+    )
+    intent = _without_project_aliases(raw, aliases)
     resume = needs_resume(raw)
-    live = requires_live_evidence(raw)
-    as_of = requested_date(raw)
-    historical = historical_query(raw) or as_of is not None
-    foreign = foreign_historical_intent(raw)
-    needed = retrieval_needed(raw, cfg) or bool(as_of and project)
+    live = requires_live_evidence(intent)
+    as_of = requested_date(intent)
+    historical = historical_query(intent) or as_of is not None
+    foreign = foreign_historical_intent(intent)
+    lookup_text = _strip_lookup_dates(raw)
+    requests = ()
+    if (
+        not resume
+        and confident
+        and _project_from_aliases(raw, cfg, single_project=True) == project
+    ):
+        requests = split_fact_requests(_strip_lookup_dates(intent), project)
+    needed = retrieval_needed(raw, cfg, project_fact_lookup=bool(requests))
+    if as_of and project and not _current_declaration(intent):
+        needed = True
     if _CASUAL_RE.fullmatch(raw):
         needed, reason = False, "casual"
     elif live and not historical:
         needed, reason = False, "live_state"
-    elif _current_declaration(raw):
+    elif _current_declaration(intent):
         needed, reason = False, "current_declaration"
     elif resume:
         needed, reason = True, "resume"
@@ -767,7 +870,6 @@ def analyze(
         )
     else:
         reason = "no_recall_intent"
-    lookup_text = _AS_OF_RE.sub(" ", raw) if as_of is not None else raw
     focus = frozenset(focus_terms(lookup_text))
     clauses = (
         tuple(
@@ -786,20 +888,14 @@ def analyze(
         historical,
         foreign,
         live,
-        should_recover_history(raw),
+        should_recover_history(intent),
         reason,
         frozenset(terms(raw)),
         focus,
-        _numeric_values(raw),
-        _stage_values(raw),
+        _numeric_values(lookup_text),
+        _stage_values(lookup_text),
         clauses,
-        split_fact_requests(raw, project)
-        if needed
-        and not resume
-        and as_of is None
-        and confident
-        and _project_from_aliases(raw, cfg, single_project=True) == project
-        else (),
+        requests if needed else (),
         as_of,
     )
 
@@ -819,6 +915,7 @@ CASUAL = _CASUAL_RE
 
 def literal_anchors_match(query, text, cfg, project):
     """An explicit product, code identifier, or version needs actual evidence."""
+    query = _strip_lookup_dates(query)
     aliases = {
         a.casefold()
         for p in cfg.get("projects", {}).values()
