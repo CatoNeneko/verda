@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77,<83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vdra"
+version = "0.1.0a1"
+description = "Project facts, evidence-aware recall, and task continuity for OpenViking"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE"]
+dependencies = ["openviking==0.5.2", "portalocker>=3.2,<4"]
+
+[project.scripts]
+vdra = "vdra.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

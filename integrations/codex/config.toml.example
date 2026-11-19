@@ -1,0 +1,4 @@
+[mcp_servers.vdra]
+url = "http://127.0.0.1:21933/mcp"
+# For API-key mode, supply the user key in the environment and uncomment:
+# bearer_token_env_var = "VDRA_API_KEY"

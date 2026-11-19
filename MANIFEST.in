@@ -1,0 +1,8 @@
+include NOTICE
+include .github/workflows/verify.yml
+graft docs
+graft examples
+graft integrations
+graft tests
+include tools/build_agent_bundles.py
+global-exclude *.py[cod]

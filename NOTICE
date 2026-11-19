@@ -1,0 +1,6 @@
+vdra 0.1.0a1 is distributed under GNU AGPL v3. See LICENSE.
+
+vdra interfaces with OpenViking 0.5.2 (https://github.com/volcengine/OpenViking),
+Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd., under AGPL v3.
+OpenViking is installed as a separate dependency. Its source, notices and
+license accompany its upstream distribution.

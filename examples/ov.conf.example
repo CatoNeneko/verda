@@ -1,0 +1,12 @@
+{
+  "server": {"host": "127.0.0.1", "port": 21933, "auth_mode": "dev"},
+  "storage": {"workspace": "REPLACE_WITH_ABSOLUTE_PATH"},
+  "embedding": {
+    "dense": {
+      "provider": "openai",
+      "model": "REPLACE_WITH_EMBEDDING_MODEL",
+      "api_base": "http://127.0.0.1:8080/v1",
+      "dimension": 384
+    }
+  }
+}
