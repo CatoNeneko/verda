@@ -22,6 +22,22 @@ OpenViking 提供存储、向量检索、会话和 MCP 接口。Verda 沿用这�
 | **记忆老化与主卡治理** | 保护重要事实，让临时状态过期，将普通历史降权或归档。项目主卡超出体积预算时，保留待整理的内容并拦住超限更新。 |
 | **召回开销可控** | 语义召回最多 **1500 token、5 项**，上下文组装无需额外调用语言模型。向量检索和可选的会话总结沿用 OpenViking 的提供者配置。 |
 
+### 从记忆宫殿到百科网格
+
+西塞罗在《论演说家》里讲过一个故事。诗人西摩尼德斯离开宴席后，厅堂倒塌。据说他凭记住的座位认出了每一位宾客。后来所谓记忆宫殿，就是把待记的信息放在熟悉的位置上，需要时沿着位置找回它。[《论演说家》第二卷 351–354 节](https://www.laits.utexas.edu/memoria/Cicero.html)
+
+Verda 借用的是**用位置帮助回忆**这件事。项目是查找的入口，决策、方法、结果等主题像不同房间，事实卡和原始来源有稳定的 `viking://` 地址。任务检查点记录做到哪里、哪些问题未决。对话压缩后，Agent 可以从这些位置恢复项目和任务，而把原始记录留作查证。
+
+**百科式链接把不同主题串起来。** 例如，结果卡可以链接到采用的方法，再由带时间的取代关系指明哪一版仍有效。这样，同一条方法或证据可以被多条结论引用，修改状态也有可追溯的路径。Verda 自动召回只沿已登记的关系扩展一跳，复核访问权限、两端内容及关系证据，并把适用的片段带进当前任务。
+
+### Verda 如何分配召回注意力
+
+这里的注意力指**哪些证据拿到上下文位置，以及占用多少预算**。Verda 按以下顺序决定。
+
+1. **先定位要解决的问题。** “继续”优先取有证据的任务快照。查询项目事实时，先看当前项目和匹配段落，再用检索补足缺项。当前问题按有效状态筛选，带日期的历史问题可以检查那一天适用的证据。
+2. **按时效处理候选。** 重要或受保护的记忆保留权重。默认情况下，被识别为临时状态的事件 1 天后过期，普通事件按 30 天半衰期降权、90 天后逻辑归档。这些时间可以配置。显式查历史时可找回归档或过期条目，并带上历史标记。原始记录仍可查证。
+3. **相关证据优先。** 候选通过来源和事实匹配检查后，排序的基础是 **35% 原生检索分 + 65% 证据匹配分**，再考虑项目、来源类型和内容重复度。分项查询优先选能覆盖此前缺项的材料，最后在 **1500 token、最多 5 项**内只送入相关片段。[召回排序](src/vdra/recall_policy.py) · [保留策略](src/vdra/memory_policy.py)
+
 ### 示例
 
 在一个合成测试项目中，Agent 同时核对**数据划分**和**预注册的传感器协议**。Verda 找到记录训练、验证、测试集按 **70% / 15% / 15%** 划分的段落，并报告 `fact_coverage.missing: [2]`。这让 Agent 能回答第一项，同时明确第二项仍需查证。
@@ -34,14 +50,22 @@ OpenViking 提供存储、向量检索、会话和 MCP 接口。Verda 沿用这�
 
 #### 本机实测
 
-Ryzen 7 9800X3D，CPU 两线程。离线对照使用 457 个脱敏来源和 2,268 个段落，两组均将稠密向量检索与 BM25 关键词检索融合。
+Ryzen 7 9800X3D，CPU 两线程。离线对照使用 457 个脱敏来源和 2,268 个段落，四种候选方案都将稠密向量检索与 BM25 关键词检索融合。
 
 | 嵌入模型 | FP32 权重 | 完整证据 Hit@5 | 热查询均值 / p95 | 查询进程内存 |
 | --- | ---: | ---: | ---: | ---: |
 | [BGE-base-zh-v1.5](https://huggingface.co/BAAI/bge-base-zh-v1.5) | 390 MiB | 69.0%（29/42） | 0.224 / 0.455 秒 | 0.77 GiB |
 | [BGE-M3](https://huggingface.co/BAAI/bge-m3) | 2.12 GiB | **81.0%（34/42）** | **0.431 / 1.028 秒** | 1.84 GiB |
+| 每次 base + M3 | 2.50 GiB | 76.2%（32/42） | 0.548 / 1.289 秒 | 2.23 GiB |
+| base 默认，按需 M3 | 2.50 GiB | 73.8%（31/42） | 0.440 / 1.306 秒 | 2.22 GiB |
 
 Hit@5 按 42 道正例计分，要求在前 5 项内找回完整的指定证据。计时使用每组 36 次热请求，包含查询编码、检索、融合和选段。该基准衡量证据召回和本机查询用时，线上 HTTP 耗时另计。
+
+#### 旧版实测和迁移过程
+
+早期版本实际使用 **BGE-small-zh-v1.5 F16 GGUF** 的 512 维向量，保留的旧向量集合为 **10.8 MiB**。换模型前，用旧版做了 10 条真实召回验收，**5 条找回预期事实，5 条应空的请求正确留空**。这套用例用于验收旧配置的实际行为。上表的 42 道正例则用于同题比较后续候选。
+
+2026 年 10 月 29 日，本机先比较了 base、M3、每次双模型和按需双模型，再选定 M3。它在这批题中找回的完整证据最多，并且只需驻留一个嵌入模型。在 6 道自然长请求里，base 命中 3 道，M3 命中 5 道。切换时用 M3 建了独立的 **1024 维向量集合**，迁入 **2,094 条**记录并核对元数据和权限，保留旧集合用于回滚。两版都使用 OpenViking 的本地向量数据库后端。
 
 ### 首次使用与部署
 
@@ -69,6 +93,22 @@ OpenViking supplies storage, vector retrieval, sessions, and MCP. Verda builds o
 | **Retention and project-card size** | Important facts are protected, temporary state expires, and routine history can be downranked or archived. Oversized project-card updates are preserved for review and blocked from growing the main card. |
 | **Bounded recall cost** | Semantic recall is capped at **1,500 tokens and five entries**. Context assembly requires no extra language-model call. Embedding and optional session summarization use the providers configured in OpenViking. |
 
+### From the memory palace to a Wikipedia-style network
+
+Cicero tells a story about the poet Simonides. After Simonides stepped outside a banquet, the hall collapsed. According to the account, he could identify the guests from their places at the table. The memory palace applies the same idea by giving facts familiar places to find them again. [Cicero, *On the Orator*, II.351–354](https://www.laits.utexas.edu/memoria/Cicero.html)
+
+Verda borrows **location as a retrieval cue**. A project is an entry point. Decisions, methods, and results occupy topic rooms. Fact cards and original sources have stable `viking://` addresses. Task checkpoints record progress and open questions. After compaction, the agent can resume from that structure and consult the original record when it needs to verify a detail.
+
+**Wikipedia-style links connect those topics.** A result can point to the method it used, while a dated replacement link records which version applies. Several conclusions can cite the same source, and changes remain traceable. Automatic recall follows registered links at most one hop. It verifies access, both entries' contents, and the evidence for the relationship before using a relevant passage.
+
+### How Verda allocates recall attention
+
+Here, attention means **which evidence gets context space and how much**. Verda allocates it in the following order.
+
+1. **Resolve the task first.** A continuation request favors an evidence-backed work snapshot. A project question starts with matching passages from that project and retrieves more evidence to fill gaps. Current questions use current evidence, and dated historical questions can look for what applied at the requested date.
+2. **Apply time and retention rules.** Important or protected memories retain their weight. By default, events recognized as temporary expire after one day. Ordinary events decay with a 30-day half-life and are logically archived after 90 days. These times are configurable. Explicit historical lookup can recover those items with a historical label. The source records stay available for verification.
+3. **Rank for evidence and coverage.** After scope and evidence checks, the base score is **35% native retrieval score plus 65% evidence-match score**, with adjustments for project, source, and repetition. Multi-part questions prioritize passages that cover an uncovered item. The final context includes relevant excerpts within **1,500 tokens and five entries**. [Ranking policy](src/vdra/recall_policy.py) · [Retention policy](src/vdra/memory_policy.py)
+
 ### Example
 
 In a synthetic test project, the agent asks for the **data split** and the **preregistered sensor protocol**. Verda retrieves the passage documenting **70% / 15% / 15%** for train, validation, and test. It reports `fact_coverage.missing: [2]`, so the agent can answer the first item and flag the second for verification.
@@ -81,14 +121,22 @@ For a lightweight setup, **BGE-small-zh-v1.5 F16 GGUF** has a measured weight fi
 
 #### Local benchmark
 
-AMD Ryzen 7 9800X3D, two CPU threads. The offline comparison used 457 redacted sources and 2,268 passages. Both runs fused dense vector retrieval with BM25 keyword search.
+AMD Ryzen 7 9800X3D, two CPU threads. The offline comparison used 457 redacted sources and 2,268 passages. All four strategies fused dense vector retrieval with BM25 keyword search.
 
 | Embedding model | FP32 weights | Complete-evidence Hit@5 | Warm query mean / p95 | Query process RSS |
 | --- | ---: | ---: | ---: | ---: |
 | [BGE-base-zh-v1.5](https://huggingface.co/BAAI/bge-base-zh-v1.5) | 390 MiB | 69.0% (29/42) | 0.224 / 0.455 s | 0.77 GiB |
 | [BGE-M3](https://huggingface.co/BAAI/bge-m3) | 2.12 GiB | **81.0% (34/42)** | **0.431 / 1.028 s** | 1.84 GiB |
+| Always base + M3 | 2.50 GiB | 76.2% (32/42) | 0.548 / 1.289 s | 2.23 GiB |
+| Base with selective M3 routing | 2.50 GiB | 73.8% (31/42) | 0.440 / 1.306 s | 2.22 GiB |
 
 Hit@5 measures whether complete reference evidence appeared among the top five results on 42 positive questions. Each latency run used 36 warm requests and included query encoding, retrieval, fusion, and passage selection. The benchmark measures evidence retrieval and local query time. Production HTTP latency is measured separately.
+
+#### Earlier deployment and migration
+
+The earlier deployment used **BGE-small-zh-v1.5 F16 GGUF** with 512-dimensional vectors. Its preserved vector collection occupies **10.8 MiB**. Before switching, it passed 10 live recall checks. **Five recovered the expected fact, and five correctly returned empty.** Those checks verified the behavior of the earlier deployment. The 42 positive questions above compare the later candidates on the same questions.
+
+On October 29, 2026, the author compared base, M3, always running both models, and selective M3 routing before choosing M3. It recovered the most complete evidence on this test set and required just one resident embedding model. On six naturally phrased long requests, base covered three and M3 covered five. The migration built a separate **1,024-dimensional collection**, moved **2,094 records** with metadata and access checks, and kept the old collection for rollback. Both versions use OpenViking's local vector database backend.
 
 ### First use and deployment
 
